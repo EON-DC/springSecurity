@@ -13,6 +13,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
 import static com.example.springsecurity.security.ApplicationUserPermission.*;
 import static com.example.springsecurity.security.ApplicationUserRole.*;
@@ -51,6 +52,10 @@ public class ApplicationSecurityConfig extends WebSecurityConfigurerAdapter {
      * antMatchers의 순서는 위애서부터 걸러지므로, GET 같은 경우엔 위로 올려 걸러지지 않도록 한다.
      *  Controller에서 @PreAuthorize 애노테이션을 사용할수 있으며, antMathcers를 대체하는 역할을 한다.
      *  annotation을 사용할 경우 @EnableGlobalMethodSecurity(prePostEnabled = true) 를 입력해줘야 인식한다.
+     *
+     *  ✱ csrf (Cross Site Response Forgery) : 웹 취약점을 이용한 공격 방법 중 하나로, iframe 같은 HTML 요소에
+     *  POST, GET 등의 퀴리를 넣어놓고 해당 사이트에 방문하면, 사용자도 모르게 공격을 하게됨. 이에 대한 방어책으로 웹 서버는
+     *  유저에게 csrf token 을 제공하고, 이 쿠키를 같이 전송해야만, 사용자의 요청을 받아들여준다.
      */
 
     private final PasswordEncoder passwordEncoder;
@@ -63,7 +68,9 @@ public class ApplicationSecurityConfig extends WebSecurityConfigurerAdapter {
     @Override
     protected void configure(HttpSecurity http) throws Exception {
         http
-                .csrf().disable() //TODO : 나중에 배울 예정
+//                .csrf().csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+//                .and()
+                .csrf().disable()
                 .authorizeRequests()
                 .antMatchers("/", "index", "/css/*", "/js/*").permitAll()
                 .antMatchers("/api/**").hasRole(STUDENT.name())
