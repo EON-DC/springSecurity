@@ -14,6 +14,9 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+
+import java.util.concurrent.TimeUnit;
 
 import static com.example.springsecurity.security.ApplicationUserPermission.*;
 import static com.example.springsecurity.security.ApplicationUserRole.*;
@@ -56,6 +59,17 @@ public class ApplicationSecurityConfig extends WebSecurityConfigurerAdapter {
      *  ✱ csrf (Cross Site Response Forgery) : 웹 취약점을 이용한 공격 방법 중 하나로, iframe 같은 HTML 요소에
      *  POST, GET 등의 퀴리를 넣어놓고 해당 사이트에 방문하면, 사용자도 모르게 공격을 하게됨. 이에 대한 방어책으로 웹 서버는
      *  유저에게 csrf token 을 제공하고, 이 쿠키를 같이 전송해야만, 사용자의 요청을 받아들여준다.
+     *
+     *  ✱ basic Auth : HTTPS recommended, Simple And Fast, Can't logout
+     *  ✱ Form Based Authentication : Username & password, Standard in most websites, Forms(Full controlled), Can logout
+     *          HTTPS recommended
+     *          Session ID 를 이용하여 사용자를 구분한다. 이는 클라이언트 쿠키에 저장되어 제공됨.
+     *          remember-me 기능을 사용할 수 있으며, Session ID 와 다르게 DB에 cookie data 가 저장되어 관리됨
+     *          2주간의 디폴트 저장기간을 갖는다. 쿠키엔 username, md5 hash of the above 2 values 를 내부에 저장함
+     *          logout() method : clearAuthentication, invalidateHttpSession 를 사용하여
+     *          내부 쿠키를 삭제할 수 있음. deleteCookies 파라미터로 CookiesName 을 입력해주면 됨
+     *          이후 logoutUrl로 로그아웃 이후 페이지 redirect 가능함.
+     *
      */
 
     private final PasswordEncoder passwordEncoder;
@@ -81,7 +95,28 @@ public class ApplicationSecurityConfig extends WebSecurityConfigurerAdapter {
                 .anyRequest()
                 .authenticated()
                 .and()
-                .httpBasic();
+                .formLogin() // Form Based Authentication(Spring 기본 제공)
+                    .loginPage("/login").permitAll()
+                    .defaultSuccessUrl("/courses", true)
+                    .passwordParameter("passwordxyz")
+                    .usernameParameter("username")
+                .and()
+                .rememberMe()
+                    .tokenValiditySeconds((int) TimeUnit.DAYS.toSeconds(21))
+                    .key("somethingverysecured")
+                .rememberMeParameter("remember-me")
+                .and()
+                .logout()
+                .logoutUrl("/logout")
+                .logoutRequestMatcher(new AntPathRequestMatcher("/logout", "GET"))
+                // default 가 csrf로부터 방어하기 위해 POST 로 설정되어있음.
+                .clearAuthentication(true)
+                .invalidateHttpSession(true)
+                .deleteCookies("JSESSIONID", "remember-me")
+                .logoutSuccessUrl("/login");
+
+
+//                .httpBasic();  // basic Auth
     }
 
     @Override
