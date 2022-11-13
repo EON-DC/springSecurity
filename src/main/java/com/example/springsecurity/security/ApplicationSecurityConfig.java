@@ -1,24 +1,23 @@
 package com.example.springsecurity.security;
 
+import com.example.springsecurity.auth.ApplicationUserService;
+import com.example.springsecurity.jwt.JwtConfig;
+import com.example.springsecurity.jwt.JwtTokenVerifier;
+import com.example.springsecurity.jwt.JwtUsernameAndPasswordAuthenticationFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
-import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
-import java.util.concurrent.TimeUnit;
+import javax.crypto.SecretKey;
 
-import static com.example.springsecurity.security.ApplicationUserPermission.*;
 import static com.example.springsecurity.security.ApplicationUserRole.*;
 
 @Configuration
@@ -70,81 +69,66 @@ public class ApplicationSecurityConfig extends WebSecurityConfigurerAdapter {
      *          내부 쿠키를 삭제할 수 있음. deleteCookies 파라미터로 CookiesName 을 입력해주면 됨
      *          이후 logoutUrl로 로그아웃 이후 페이지 redirect 가능함.
      *
+     *  ✱ In Memory DB -> Stored Migration
+     *  필요한 것은 DB(Repository)에 접근하여 UserDetails 에 대한 정보를 만드는 것
+     *  그러기 위해 UserDetails를 상속한 ApplicationUser를 만듦
+     *  Dao Interface를 만들어서, select username 메소드를 정의함.
+     *  이후 service 를 만들어서 UserDetailsService 를 구현함
+     *  구현체에는 username 을 로딩하는 메소드가 정의되어있는데,
+     *  우리는 UserDao를 구현한 FakeApplicationUserDaoService 를 만들어 Optional User를 제공하게 했다.
+     *  우리가 만든 ApplicationUserService는 UserDetails 를 제공할 수 있게되고,
+     *  WebSecurityConfigurerAdapter의 DaoAuthenticationProvider 메소드를 Override하여
+     *  PasswordEncoder와 UserDetailsService 를 Provider에 담는다.
+     *  이는 다시 configure 를 overload 한 함수에 넣을 수 있고, builder에 우리가 만든 provider 를 inj 한다.
+     *
+     *  ✱ JSON WEB TOKEN (JWT)
+     *  : (+) Fast, Stateless, Used accross many services
+     *    (-) Compromised Secret key, No visibility to logged in users, Token can be stolen
      */
 
     private final PasswordEncoder passwordEncoder;
+    private final ApplicationUserService userService;
+    private final SecretKey secretKey;
+    private final JwtConfig jwtConfig;
 
     @Autowired
-    public ApplicationSecurityConfig(PasswordEncoder passwordEncoder) {
+    public ApplicationSecurityConfig(PasswordEncoder passwordEncoder,
+                                     ApplicationUserService userService,
+                                     SecretKey secretKey,
+                                     JwtConfig jwtConfig) {
         this.passwordEncoder = passwordEncoder;
+        this.userService = userService;
+        this.secretKey = secretKey;
+        this.jwtConfig = jwtConfig;
     }
 
     @Override
     protected void configure(HttpSecurity http) throws Exception {
         http
-//                .csrf().csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-//                .and()
                 .csrf().disable()
+                .sessionManagement()
+                    .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                .and()
+                .addFilter(new JwtUsernameAndPasswordAuthenticationFilter(authenticationManager(), jwtConfig, secretKey))
+                .addFilterAfter(new JwtTokenVerifier(secretKey, jwtConfig), JwtUsernameAndPasswordAuthenticationFilter.class)
                 .authorizeRequests()
                 .antMatchers("/", "index", "/css/*", "/js/*").permitAll()
-                .antMatchers("/api/**").hasRole(STUDENT.name())
-//                .antMatchers("/management/api/**").hasAnyRole(ADMIN.name(), ADMINTRAINEE.name()) // 기본 GET
-//                .antMatchers(HttpMethod.DELETE, "/management/api/**").hasAuthority(COURSE_WRITE.getPermission())
-//                .antMatchers(HttpMethod.PUT, "/management/api/**").hasAuthority(COURSE_WRITE.getPermission())
-//                .antMatchers(HttpMethod.POST, "/management/api/**").hasAuthority(COURSE_WRITE.getPermission())
+                .antMatchers("/api/**").hasAnyRole(STUDENT.name())
                 .anyRequest()
-                .authenticated()
-                .and()
-                .formLogin() // Form Based Authentication(Spring 기본 제공)
-                    .loginPage("/login").permitAll()
-                    .defaultSuccessUrl("/courses", true)
-                    .passwordParameter("passwordxyz")
-                    .usernameParameter("username")
-                .and()
-                .rememberMe()
-                    .tokenValiditySeconds((int) TimeUnit.DAYS.toSeconds(21))
-                    .key("somethingverysecured")
-                .rememberMeParameter("remember-me")
-                .and()
-                .logout()
-                .logoutUrl("/logout")
-                .logoutRequestMatcher(new AntPathRequestMatcher("/logout", "GET"))
-                // default 가 csrf로부터 방어하기 위해 POST 로 설정되어있음.
-                .clearAuthentication(true)
-                .invalidateHttpSession(true)
-                .deleteCookies("JSESSIONID", "remember-me")
-                .logoutSuccessUrl("/login");
+                .authenticated();
 
-
-//                .httpBasic();  // basic Auth
     }
 
     @Override
+    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
+        auth.authenticationProvider(daoAuthenticationProvider());
+    }
+
     @Bean
-    protected UserDetailsService userDetailsService() {
-        UserDetails parkUser = User.builder()
-                .username("park")
-                .password(passwordEncoder.encode("1234"))
-//                .roles(STUDENT.name()) // ROLE_STUDENT
-                .authorities(STUDENT.getGrantedAuthorities())
-                .build();
-
-        UserDetails lindaUser = User.builder()
-                .username("linda")
-                .password(passwordEncoder.encode("12345"))
-//                .roles(ADMIN.name()) // ROLE_ADMIN
-                .authorities(ADMIN.getGrantedAuthorities())
-                .build();
-
-        UserDetails tomUser = User.builder()
-                .username("tom")
-                .password(passwordEncoder.encode("12345"))
-//                .roles(ADMINTRAINEE.name()) // ROLE_ADMIN
-                .authorities(ADMINTRAINEE.getGrantedAuthorities())
-                .build();
-
-        return new InMemoryUserDetailsManager(
-                parkUser, lindaUser, tomUser
-        );
+    public DaoAuthenticationProvider daoAuthenticationProvider(){
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setPasswordEncoder(passwordEncoder);
+        provider.setUserDetailsService(userService);
+        return provider;
     }
 }
